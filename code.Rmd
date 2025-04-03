@@ -1,0 +1,413 @@
+---
+title: "Mélange de gaussiens EM"
+author: "ZIDAN Loubna et ZIDAN Lama"
+date: "2023-02-15"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(mvtnorm)
+library(graphics)
+library(ggplot2)
+```
+
+
+**Introduction**
+
+Expectation-Maximization (EM) est un algorithme itératif pour trouver des estimations de probabilité maximale de paramètres dans des modèles statistiques, où le modèle dépend de variables latentes non observées.
+
+L'itération EM alterne entre l'exécution d'une étape (E), qui crée une fonction pour l'espérance de la log-vraisemblance évaluée à l'aide de l'estimation actuelle des paramètres. 
+
+Et une étape de maximisation (M), qui calcule les paramètres maximisant la log-vraisemblance attendue. vraisemblance trouvée à l'étape E.
+
+Répéter ces étapes jusqu'à ce que la convergence soit détectée.
+
+Au cours de ce projet, nous allons  implémenter l'algorithme EM pour la distribution du mélange gaussien, en utilisant une variable latente Z.
+
+
+**Plan**
+
+1-Implementer la fonction Estep qui retourne les probabilités d'appartenance de chaque point à chaque cluster
+
+2-Implementer la fonction Mstep qui retourne les parametres optimales du modele
+
+3-Implementer la fonction  vraisemblance 
+
+4-Regrouper toutes ces fonctions en une seule function EM
+
+
+La fonction EM va retourner: 
+
+-Les itérations avec les valeurs ve vraisemblances coresspondantes
+  
+-Le plot de vraisemblance
+
+-Le plot des erreurs qui montre la convergence
+
+-Les parametres optimaux correspondants à chaque cluster: (densité(pi), moyenne(mu), et variance(sigma))
+  
+-Gamma qui sont les probabilités d'appartenance de chaque point à chaque cluster
+  
+-Le cluster attribué à chaque point
+  
+-Les données colorées par cluster (plot final)
+  
+  
+Nous allons appliquer notre modele sur deux base de données:
+
+-La premiere est une base de données simulée multivariée à l'aide de la fonction (mvnorm) de deux dimensions avec 350     points (N). 
+  
+Ses parametres seront générées en fonction de K (nombre de clusters) et degree(nombre de dimensions).
+Nous allons fixer k le nombre de clusters à 2.
+  
+  
+-La deuxieme base de données sera Iris, nous allons sélectionner également 2 colonnes 3 et 4, et le nombre de clusters    sera égale à 2 également.
+  
+L'algorithme se repete jusqu'à n.trial fois qui est égale à N, la condition d'arrete sera :
+  
+si la proportion ((nouvelle valeur de vraisemblance moins l'ancienne valeure obtenue)divisé par l'ancienne valeure) est inferieure à un épsilon e , on sort de la boucle!
+  
+
+
+
+*Voici les fonctions Estep et Mstep:*
+
+on vas donc utiliser les fonctions E step et M Step pour trouver les paramètres de la distribution du mélange gaussien et les appliquer jusqu'à la convergence.
+
+```{r}
+#Estep:
+
+Estep <- function(data,pi,mu,sigma,K){
+  
+  result <- apply(data, 1, function(xt){
+    
+    gamma_i <- sapply(1:K,function(k) {
+      
+      pi[k] * dmvnorm(xt, mu[,k], sigma[,,k])
+    })
+    
+    gamma_i / sum(gamma_i)#normalization
+  })
+  
+ gamma<- t(result)
+}
+```
+
+
+
+
+```{r}
+#Mstep:
+
+Mstep <- function(gamma,data,K,N,degree) {
+  gamma.sum <- apply(gamma,2,sum)
+  new.pi <- gamma.sum/N;
+  new.mu <- t(t(t(data) %*% gamma) / gamma.sum);
+  new.sigma <- array(0, dim=c(degree, degree, K));
+  
+  
+  for(k in 1:K) {
+    sig <- matrix(0,degree,degree);
+    for(n in 1:N) {
+      sig <- sig + gamma[n, k] * (data[n,] %*% t(data[n,]));
+    }
+    new.sigma[,,k] <- sig / gamma.sum[k] - new.mu[,k] %*% t(new.mu[,k])
+  }  
+  list(new.pi, new.mu, new.sigma);
+}
+```
+
+
+
+
+
+
+
+
+*Calcul de la vraisemblance marginale:*
+```{r}
+
+vraisemblance <- function(data, pi,mu,sigma,K){
+
+  loglike = matrix(0, n.trial, K)
+  for(k in 1:K) {
+    loglike[,k] = pi[k] * dmvnorm(data, mu[,k], sigma[,,k])
+    }
+  loglike = sum(log(rowSums(loglike)))
+  
+return(sum(loglike))
+}
+
+```
+
+
+
+
+Ensuite, nous allons regrouper tout dans une seule fonction EM comme suivant:
+
+*EM:*
+
+```{r}
+
+EM<-function(data,K,n.trial,e){
+
+#initalisations aléatoires des parametres :
+
+  pi <- runif(K)
+  pi <- runif(K)/sum(pi)
+
+  mu <- matrix(runif(K*degree), nrow=degree, ncol=K)
+
+  sigma <- array(0, dim=c(degree, degree, K))
+  for(k in 1:K){
+    sigma[,,k] <- diag(runif(degree))
+  }
+  
+  
+  
+#calculer l'error, la vraisemblance, et les parametres optimales:
+
+  count <- 0
+  errorlist    <-  rep(0,n.trial)
+  logliklist   <-  rep(0,n.trial)
+  
+  for(i in 1:n.trial){
+    count <- count +1
+    old_loglik = vraisemblance(data,pi,mu,sigma,K)
+    
+    gamma <- Estep(data,pi,mu,sigma,K)
+    result <- Mstep(gamma,data,K,N,degree)
+    
+    new.pi <- result[[1]]
+    new.mu <- result[[2]]
+    new.sigma <- result[[3]]
+    
+    error <-sum((new.pi-pi)^2) + sum((new.mu-mu)^2) + sum((new.sigma-sigma)^2)
+    errorlist[i] <- error
+    
+    pi <- new.pi
+    mu <- new.mu
+    sigma <- new.sigma
+    
+    new_loglik = vraisemblance(data,pi,mu,sigma,K)
+    logliklist[i+1] = new_loglik
+    
+    
+    #critere d'arret:
+    critere = abs((new_loglik - old_loglik)/old_loglik)
+    if(critere < e) break
+
+    cat("loglike à l\'étape ", i, " : ", new_loglik, '\n')
+  }
+  
+  
+  
+  #Les resultats: 
+  
+  #Afficher le plot de vraisemblance
+  plot_lhood<-plot(logliklist[2:count],main='vraisemblance')
+  
+  #Afficher le plot de l'erreur
+  plot_error<-plot(errorlist[2:count],log="y",main='error plot')
+  
+  
+  #Afficher les parametres finales: 
+  for(k in 1:K) {
+    cat('Cluster ', k, '\n')
+  
+    cat('Pi  : \n')
+    print(pi[k])
+
+    cat('mu : \n')
+    print(mu[k])
+
+    cat('Sigma : \n')
+    print(sigma[k])
+}
+  
+  
+  #Afficher le cluster attribué à chaque point :
+  clustering = apply(gamma, MARGIN = 1, which.max)
+  plot_clustering<-plot(clustering, main='clustering plot')
+  
+  
+  
+  
+  clustr<-data.frame(clustering)
+  x<-data.frame(data[,1])
+  y<-data.frame(data[,2])
+
+  data_final<-data.frame(x,y,clustr)
+  
+  
+  #Afficher les données colorées par cluster: 
+  data_plot<-ggplot(data_final) +
+  aes(x = data...1., y = data...2., colour = clustering) +
+  geom_point(shape = "circle", size = 2.45) +
+  scale_color_gradient(low = "#4184C8", high = "#D65A0D") +
+  theme_minimal() +
+  theme(legend.position = "none")
+  
+  
+  return(list(plot_lhood,plot_error,gamma,clustering,plot_clustering,data_plot))
+}
+
+```
+
+
+
+
+
+
+
+
+
+*Premiere expérience : Appliquer EM sur des données simulées*
+
+
+on utilise les paramètres ci-dessous pour générer les données
+
+Échantillonnage d'abord N fois à partir d'une distribution multinomiale pour déterminer quel cluster génère les données, puis pour chaque résultat des échantillons de la distribution multinomiale, on utilise la distribution multi gaussienne (fonction mvnorm) pour échantillonner:
+
+```{r}
+set.seed(1010)
+
+K<-2 #nombre de clusters
+degree <- 2  #dimensions (2D)
+N <- 350 #nombre de points
+
+pi.true <- runif(K)
+pi.true <- pi.true/sum(pi.true) 
+
+mu.true <- matrix(runif(K*degree,min=-2,max=2), nrow=degree, ncol=K)
+
+sigma.true <- array(0, dim=c(degree, degree, K))
+
+for(k in 1:K){
+  sigma.true[,,k] <- diag(1,nrow=degree, ncol=degree)
+}
+
+```
+
+
+
+```{r}
+data_simule <-  t(apply(rmultinom(N,1,pi.true),2,function(num) {
+  maxindex <- which.max(num)
+  rmvnorm(1, mu.true[,maxindex], sigma.true[,,maxindex])
+}))
+```
+
+Voyons à quoi ressemblent les données:
+
+```{r}
+plot(data_simule)
+```
+
+
+
+
+
+```{r}
+n.trial<-350
+e<-1e-5
+res_em = EM(data_simule,K,n.trial,e)
+
+```
+
+On remarque que l'algorithme a convrgé apres 21 étapes et que la meilleur valeur de la vraisemblance est égale à -1156.444 
+
+Les parametres éstimés pour chaque cluster sont :
+
+#cluster1: 
+
+Pi  : 0.5122733
+
+mu  : -1.45374
+
+Sigma : 0.9064686
+
+#cluster2: 
+
+Pi estimé : 0.4877267
+
+mu estimé : 0.3949344
+
+Sigma estimé : -0.1647762
+
+
+
+
+```{r}
+res_em
+```
+
+On remarque ici que la probabilité que le premier point appartient au premier cluster est plus grande que la probabilité d'appartenace au second cluster
+
+On voit bien que le premier point appartient au premier cluster
+
+Les données sont bien regroupées en deux clusters selon le plot final
+
+
+
+
+*Deuxieme expérience: appliquer EM sur les données Iris*
+
+
+#charger les données: 
+```{r}
+data_iris<-as.matrix(iris[,3:4])
+plot(data_iris)
+```
+
+
+
+```{r}
+set.seed(1010)
+
+K<-2  #nombre de clusters
+degree <- 2  #degree de données(2D)
+N <- 150 #nombre de samples
+n.trial<-150
+e<-1e-5
+res_em = EM(data_iris,K,n.trial,e)
+```
+On voit que l'algorithme converge apres 6 étapes avec une meiileur vraisemblance de  -154.7315
+
+Les parametres éstimés pour chaque cluster sont :
+
+#cluster1: 
+
+pi estimé : 0.3331373
+
+mu estimé : 1.461816
+
+Sigma estimé: 0.0295005
+
+#Cluster2: 
+
+Pi estimé : 0.6668627
+
+mu estimé : 0.2459251
+
+Sigma estimé : 0.005936244
+
+
+
+
+```{r}
+res_em
+```
+On remarque ici que la probabilité que le premier point appartient au premier cluster est 9.999772e-01, et pour le second cluster est 2.278703e-05
+
+On voit bien que le premier point appartient au premier cluster! 
+
+Les données sont bien regroupées en deux clusters finalement.
+
+
